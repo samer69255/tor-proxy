@@ -1,0 +1,30 @@
+{
+  "name": "tor-proxy",
+  "version": "1.0.0",
+  "description": "",
+  "main": "proxy.js",
+  "dependencies": {
+    "assert": "^1.4.1",
+    "debug": "^2.2.0",
+    "http-proxy": "^1.14.0",
+    "node-http-proxy": "^0.2.3",
+    "socks": "^1.1.9",
+    "tor-request": "^1.0.6",
+    "underscore": "^1.8.3",
+    "ws": "^1.1.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kauegimenes/tor-proxy.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kauegimenes/tor-proxy/issues"
+  },
+  "homepage": "https://github.com/kauegimenes/tor-proxy"
+}
