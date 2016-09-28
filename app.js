@@ -9,6 +9,7 @@ var assert = require('assert');
 var debug = require('debug')('proxy');
 var util = require('util');
 var _ = require('underscore');
+var requireNew = require('require-new');
 
 // log levels
 debug.request = require('debug')('proxy ← ← ←');
@@ -45,7 +46,7 @@ function getTorSession(sessionKey, done) {
   }
   torSession.busy = true;
   torSession.lastUse = new Date();
-  var tr = new require('tor-request')();
+  var tr = requireNew('tor-request');
   tr.TorControlPort.password = TOR_CONTROL_PASS;
   tr.TorControlPort.port = torSession.control;
   tr.setTorAddress('localhost', torSession.tor);

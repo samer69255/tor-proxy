@@ -8,6 +8,7 @@
     "debug": "^2.2.0",
     "http-proxy": "^1.14.0",
     "node-http-proxy": "^0.2.3",
+    "require-new": "^1.1.0",
     "socks": "^1.1.9",
     "tor-request": "^1.0.6",
     "underscore": "^1.8.3",
