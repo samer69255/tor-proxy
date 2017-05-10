@@ -50,11 +50,10 @@ function setupTorSession(sessionKey) {
   var tr = requireNew('tor-request');
   tr.setTorAddress('localhost', torSession.tor);
   console.log('Using tor session', torSession);
-  if (sessionKey) return done(null, tr, torSession);
-  tr.end = function() {
-    console.log('not busy');
+  tr.end = function () {    
     torSession.busy = false;
-  }  
+  }
+  tr.session = torSession;
   return tr;
 }
 // hostname
@@ -83,11 +82,12 @@ function setup(server, options) {
 }
 setup();
 
-function torRequest(options, done) {
+function torRequest(options, done, session) {
   console.log('requesting')
-  let tr = setupTorSession();
-  return tr.request(options, function (err, res, body) {    
+  let tr = setupTorSession(session);
+  return tr.request(options, function (err, res, body) {
     tr.end();
+    console.log(body);
     return done(err, res, body);
   });
 }
@@ -108,7 +108,8 @@ var hopByHopHeaders = [
   'TE',
   'Trailers',
   'Transfer-Encoding',
-  'Upgrade'
+  'Upgrade',
+  'X-Session'
 ];
 
 // create a case-insensitive RegExp to match "hop by hop" headers
@@ -152,6 +153,33 @@ function eachHeader(obj, fn) {
   }
 }
 
+function parseHeaders(req) {
+  let headers = {};
+  let sessionKey = null;
+  eachHeader(req, function (key, value) {
+    //console.log('Request Header: "%s: %s"', key, value);
+    var keyLower = key.toLowerCase();
+    if (keyLower === 'x-session') sessionKey = value;
+
+    if (isHopByHop.test(key)) {
+      debug.proxyRequest('ignoring hop-by-hop header "%s"', key);
+    } else {
+      var v = headers[key];
+      if (Array.isArray(v)) {
+        v.push(value);
+      } else if (null != v) {
+        headers[key] = [v, value];
+      } else {
+        headers[key] = value;
+      }
+    }
+  });
+  return {
+    headers: headers,
+    session: sessionKey
+  };
+}
+
 /**
  * HTTP GET/POST/DELETE/PUT, etc. proxy requests.
  */
@@ -180,64 +208,17 @@ function onrequest(req, res) {
     parsed.method = req.method;
 
     // setup outbound proxy request HTTP headers
-    var headers = {};
-    var hasXForwardedFor = false;
-    var hasVia = false;
-    //var via = '1.1 ' + hostname + ' (proxy/' + version + ')';
+    var parseResult = parseHeaders(req);
+    var headers = parseResult.headers;
+    var sessionKey = parseResult.session;    
 
-    parsed.headers = headers;
-    eachHeader(req, function (key, value) {
-      console.log('Request Header: "%s: %s"', key, value);
-      var keyLower = key.toLowerCase();
-
-      /*if (!hasXForwardedFor && 'x-forwarded-for' === keyLower) {
-        // append to existing "X-Forwarded-For" header
-        // http://en.wikipedia.org/wiki/X-Forwarded-For
-        hasXForwardedFor = true;
-        value += ', ' + socket.remoteAddress;
-        debug.proxyRequest('appending to existing "%s" header: "%s"', key, value);
-      }*/
-
-      if (!hasVia && 'via' === keyLower) {
-        // append to existing "Via" header
-        hasVia = true;
-        value += ', ' + via;
-        debug.proxyRequest('appending to existing "%s" header: "%s"', key, value);
-      }
-
-      if (isHopByHop.test(key)) {
-        debug.proxyRequest('ignoring hop-by-hop header "%s"', key);
-      } else {
-        var v = headers[key];
-        if (Array.isArray(v)) {
-          v.push(value);
-        } else if (null != v) {
-          headers[key] = [v, value];
-        } else {
-          headers[key] = value;
-        }
-      }
-    });
-
-    // add "X-Forwarded-For" header if it's still not here by now
-    // http://en.wikipedia.org/wiki/X-Forwarded-For
-    /*if (!hasXForwardedFor) {
-      headers['X-Forwarded-For'] = socket.remoteAddress;
-      debug.proxyRequest('adding new "X-Forwarded-For" header: "%s"', headers['X-Forwarded-For']);
-    }*/
-
-    // add "Via" header if still not set by now
-    if (!hasVia) {
-      //headers.Via = via;
-      //debug.proxyRequest('adding new "Via" header: "%s"', headers.Via);
-    }
+    parsed.headers = headers;    
 
     // custom `http.Agent` support, set `server.agent`
     var agent = server.agent;
     if (null != agent) {
       debug.proxyRequest('setting custom `http.Agent` option for proxy request: %s', agent);
-      parsed.agent = agent;
-      console.log(agent);
+      parsed.agent = agent;      
       agent = null;
     }
 
@@ -256,8 +237,8 @@ function onrequest(req, res) {
     parsed.url = parsed.href;
 
     var gotResponse = false;
-    var torReq = torRequest(parsed, function (err, proxyReq, body) {
-      console.log(body);
+    console.log(parsed);
+    var torReq = torRequest(parsed, function (err, proxyReq, body) {      
       if (err) return onerror(err);
       debug.proxyRequest('%s %s HTTP/1.1 ', proxyReq.method, proxyReq.path);
 
@@ -333,7 +314,7 @@ function onrequest(req, res) {
       //res.end('test');
       //proxyReq.resume();
       //proxyReq.pipe(res);
-    });
+    }, sessionKey);
     torReq.pipe(res);
   });
 
@@ -344,14 +325,14 @@ function onrequest(req, res) {
  */
 
 function onconnect(req, socket, head) {
-  console.log('test')
   debug.request('%s %s HTTP/%s ', req.method, req.url, req.httpVersion);
   assert(!head || 0 == head.length, '"head" should be empty for proxy requests');
 
   var res;
   var target;
   var gotResponse = false;
-
+  var parseResult = parseHeaders(req);
+  var sessionKey = parseResult.session;
   // define request socket event listeners
   function onclientclose(err) {
     debug.request('HTTP request %s socket "close" event', req.url);
@@ -398,6 +379,8 @@ function onconnect(req, socket, head) {
   }
 
   function ontargetconnect() {
+    console.log('targetconnect');
+
     debug.proxyResponse('proxy target %s "connect" event', req.url);
     debug.response('HTTP/1.1 200 Connection established');
     gotResponse = true;
@@ -407,7 +390,6 @@ function onconnect(req, socket, head) {
 
     // HACK: force a flush of the HTTP header
     res._send('');
-
     // relinquish control of the `socket` from the ServerResponse instance
     res.detachSocket(socket);
 
@@ -415,7 +397,16 @@ function onconnect(req, socket, head) {
     // up before this socket proxying is completed
     res = null;
 
+    var parser = new require('stream').Transform();
+    parser._transform = function (data, encoding, done) {
+      var textChunk = data.toString('utf8');
+      //      console.log(textChunk); BUGGGG PESADO
+      this.push(data);
+      done();
+    };
     socket.pipe(target);
+
+
     target.pipe(socket);
   }
 
@@ -472,39 +463,38 @@ function onconnect(req, socket, head) {
     var host = parts[0];
     var port = +parts[1];
 
-    getTorSession(null, function (err, tr, session) {
-      if (err) return ontargeterror(err);
-      var Socks = require('socks');
-      var options = {
-        proxy: {
-          ipaddress: "localhost", // tor address
-          port: session.tor, // tor port
-          type: 5,
-        },
-        target: {
-          host: host, // can be an ip address or domain (4a and 5 only) 
-          port: port
-        },
-        timeout: 60000,
-        command: 'connect' // This defaults to connect, so it's optional if you're not using BIND or Associate. 
-      };
+    var tr = setupTorSession(sessionKey);
+    var session = tr.session;
+    var Socks = require('socks');
+    var options = {
+      proxy: {
+        ipaddress: "localhost", // tor address
+        port: session.tor, // tor port
+        type: 5,
+      },
+      target: {
+        host: host, // can be an ip address or domain (4a and 5 only) 
+        port: port
+      },
+      timeout: 60000,
+      command: 'connect' // This defaults to connect, so it's optional if you're not using BIND or Associate. 
+    };
 
-      Socks.createConnection(options, function (err, socksTarget, info) {
-        debug.proxyRequest('connecting to proxy target %j', options);
-        if (err) return ontargeterror(err);
-        if (!socksTarget) return console.error(new Error("No target socket"));
-        target = socksTarget;
-        // hack force 'connect' event
-        ontargetconnect();
-        target.on('connect', ontargetconnect);
-        target.on('close', ontargetclose);
-        target.on('error', ontargeterror);
-        target.on('end', ontargetend);
-        target.on('end', function () {
-          session.busy = false;
-        })
-        target.resume();
-      });
+    Socks.createConnection(options, function (err, socksTarget, info) {
+      debug.proxyRequest('connecting to proxy target %j', options);
+      if (err) return ontargeterror(err);
+      if (!socksTarget) return console.error(new Error("No target socket"));
+      target = socksTarget;
+      // hack force 'connect' event
+      ontargetconnect();
+      target.on('connect', ontargetconnect);
+      target.on('close', ontargetclose);
+      target.on('error', ontargeterror);
+      target.on('end', ontargetend);
+      target.on('end', function () {
+        session.busy = false;
+      })
+      target.resume();
     });
   });
 }
