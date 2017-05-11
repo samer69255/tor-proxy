@@ -22,6 +22,7 @@ const TOR_CONTROL_PORT = 30320;
 const TOR_CONTROL_PASS = "wM0XZoaJ6urBtW";
 const TOR_PORT = 17500;
 const MAX_CONNECTIONS = 100;
+const PROXY_PORT = 80;
 
 var sessions = [];
 for (var i = 0; i < MAX_CONNECTIONS; i++)
@@ -49,8 +50,8 @@ function setupTorSession(sessionKey) {
   torSession.lastUse = new Date();
   var tr = requireNew('tor-request');
   tr.setTorAddress('localhost', torSession.tor);
-  console.log('Using tor session', torSession);
-  tr.end = function () {    
+  //console.log('Using tor session', torSession);
+  tr.end = function () {
     torSession.busy = false;
   }
   tr.session = torSession;
@@ -72,8 +73,8 @@ var hostname = require('os').hostname();
 function setup(server, options) {
   if (!server) {
     server = http.createServer();
-    server.listen(8090);
-    console.log('Server listening...')
+    server.listen(PROXY_PORT);
+    console.log('Server listening on port %s', PROXY_PORT);
   }
 
   server.on('request', onrequest);
@@ -83,11 +84,9 @@ function setup(server, options) {
 setup();
 
 function torRequest(options, done, session) {
-  console.log('requesting')
   let tr = setupTorSession(session);
   return tr.request(options, function (err, res, body) {
     tr.end();
-    console.log(body);
     return done(err, res, body);
   });
 }
@@ -157,7 +156,6 @@ function parseHeaders(req) {
   let headers = {};
   let sessionKey = null;
   eachHeader(req, function (key, value) {
-    //console.log('Request Header: "%s: %s"', key, value);
     var keyLower = key.toLowerCase();
     if (keyLower === 'x-session') sessionKey = value;
 
@@ -210,15 +208,15 @@ function onrequest(req, res) {
     // setup outbound proxy request HTTP headers
     var parseResult = parseHeaders(req);
     var headers = parseResult.headers;
-    var sessionKey = parseResult.session;    
+    var sessionKey = parseResult.session;
 
-    parsed.headers = headers;    
+    parsed.headers = headers;
 
     // custom `http.Agent` support, set `server.agent`
     var agent = server.agent;
     if (null != agent) {
       debug.proxyRequest('setting custom `http.Agent` option for proxy request: %s', agent);
-      parsed.agent = agent;      
+      parsed.agent = agent;
       agent = null;
     }
 
@@ -237,13 +235,11 @@ function onrequest(req, res) {
     parsed.url = parsed.href;
 
     var gotResponse = false;
-    console.log(parsed);
-    var torReq = torRequest(parsed, function (err, proxyReq, body) {      
+    var torReq = torRequest(parsed, function (err, proxyReq, body) {
       if (err) return onerror(err);
       debug.proxyRequest('%s %s HTTP/1.1 ', proxyReq.method, proxyReq.path);
 
       proxyReq.on('response', function (proxyRes) {
-        console.log('response event');
         debug.proxyResponse('HTTP/1.1 %s', proxyRes.statusCode);
         gotResponse = true;
 
@@ -266,7 +262,6 @@ function onrequest(req, res) {
 
         debug.response('HTTP/1.1 %s', proxyRes.statusCode);
         res.writeHead(proxyRes.statusCode, headers);
-        console.log('pipe');
         proxyRes.pipe(res);
         res.on('finish', onfinish);
       });
@@ -309,11 +304,6 @@ function onrequest(req, res) {
         socket.removeListener('close', onclose);
         res.removeListener('finish', onfinish);
       }
-
-
-      //res.end('test');
-      //proxyReq.resume();
-      //proxyReq.pipe(res);
     }, sessionKey);
     torReq.pipe(res);
   });
@@ -379,8 +369,6 @@ function onconnect(req, socket, head) {
   }
 
   function ontargetconnect() {
-    console.log('targetconnect');
-
     debug.proxyResponse('proxy target %s "connect" event', req.url);
     debug.response('HTTP/1.1 200 Connection established');
     gotResponse = true;
@@ -400,7 +388,6 @@ function onconnect(req, socket, head) {
     var parser = new require('stream').Transform();
     parser._transform = function (data, encoding, done) {
       var textChunk = data.toString('utf8');
-      //      console.log(textChunk); BUGGGG PESADO
       this.push(data);
       done();
     };
