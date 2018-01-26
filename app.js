@@ -73,8 +73,8 @@ var hostname = require('os').hostname();
 function setup(server, options) {
   if (!server) {
     server = http.createServer();
-    server.listen(PROXY_PORT);
-    console.log('Server listening on port %s', PROXY_PORT);
+    server.listen(process.env.port||PROXY_PORT);
+    console.log('Server listening on port %s', process.env.port);
   }
 
   server.on('request', onrequest);
